@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "./colors.h"
 #include "./tiny-json.h"
 #define USE_KECCAK 1
 #include "./sha3.h"
@@ -638,9 +639,9 @@ int main(int argc, char *argv[]) {
     }
 
     // encode domain separator
-    // uint8_t domainSeparator[32];
-    // encode(json, "EIP712Domain", domainSeparator);
-    // DEBUG_DISPLAY_VAL("domainSeparator", "hash %s", 65, domainSeparator[ctr]);
+    uint8_t domainSeparator[32];
+    encode(json, "EIP712Domain", domainSeparator);
+    DEBUG_DISPLAY_VAL(BOLDGREEN "domainSeparator" RESET, "hash %s", 65, domainSeparator[ctr]);
 
     // encode primaryType type
     uint8_t msgHash[32];
@@ -650,7 +651,7 @@ int main(int argc, char *argv[]) {
     } else if (2 == encode(json, primeType, msgHash)) {
         printf("message hash is NULL\n");
     } else {
-        DEBUG_DISPLAY_VAL("message", "hash %s", 65, msgHash[ctr]);
+        DEBUG_DISPLAY_VAL(BOLDGREEN "message" RESET, "hash %s", 65, msgHash[ctr]);
     }
 
     return EXIT_SUCCESS;
