@@ -1,0 +1,36 @@
+{
+    "types": {
+        "EIP712Domain": [
+            {
+                "name": "name",
+                "type": "string"
+            },
+            {
+                "name": "version",
+                "type": "string"
+            },
+            {
+                "name": "chainId",
+                "type": "uint256"
+            },
+            {
+                "name": "verifyingContract",
+                "type": "address"
+            },
+            {
+                "name": "salt",
+                "type": "bytes32"
+            }
+        ]
+    },
+    "primaryType": "EIP712Domain",
+    "message": {},
+    "domain": {
+        "name": "Trezor",
+        "version": "Test v0.0.0",
+        "chainId": 1,
+        "verifyingContract": "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC",
+        "salt": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+}
+
