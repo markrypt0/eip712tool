@@ -1,0 +1,29 @@
+{
+    "types": {
+        "EIP712Domain": [],
+        "Message": [
+            {
+                "name": "element",
+                "type": "Element[]"
+            }
+        ],
+        "Element": [
+            {
+                "name": "foo",
+                "type": "int8"
+            }
+        ]
+    },
+    "primaryType": "Message",
+    "message": {
+        "element": [
+            {
+                "foo": 1
+            },
+            {
+                "foo": 2
+            }
+        ]
+    },
+    "domain": {}
+}
