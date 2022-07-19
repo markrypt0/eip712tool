@@ -28,5 +28,10 @@
         ],
         "contents": "Hello, Bob!"
     },
-    "domain": {}
+    "domain": {},
+    "results": {
+        "test_data": "metamask_array_of_structs",
+        "message_hash": "0xac26cc7aa2cb9a8a445fae4e48b33f978b558da9b16e26381c53814d3317f541",
+        "domain_separator_hash": "0x6192106f129ce05c9075d319c1fa6ea9b3ae37cbd0c1ef92e2be7137bb07baa1"
+    }
 }

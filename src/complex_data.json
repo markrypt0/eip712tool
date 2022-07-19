@@ -122,5 +122,11 @@
             "How are you?",
             "Hope you're fine"
         ]
-    }
+    },
+    "results": {
+        "test_data": "complex_data",
+        "message_hash": "0xdbafe746b1c47e4870f6f77205660d3c49a94db9a80939809bfca7bf43919df5",
+        "domain_separator_hash": "0xc4f4e0cd1376e27837fe933e3f77b7bd6213211b377f0e19815a0dbd194731cc"
+}
+
 }

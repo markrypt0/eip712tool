@@ -25,5 +25,10 @@
             }
         ]
     },
-    "domain": {}
+    "domain": {},
+    "results": {
+        "test_data": "array_of_structs",
+        "message_hash": "0x7be2cca6dd2e37cf3e8ab76ab19df174e369ad48e3fd0088c7f99137cbf6a2d8",
+        "domain_separator_hash": "0x6192106f129ce05c9075d319c1fa6ea9b3ae37cbd0c1ef92e2be7137bb07baa1"
+    }
 }

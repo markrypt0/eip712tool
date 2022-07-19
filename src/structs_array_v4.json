@@ -80,5 +80,10 @@
                 "type": "address[]"
             }
         ]
+    },
+    "results": {
+        "test_data": "structs_array_v4",
+        "domain_separator_hash": "0xf2cee375fa42b42143804025fc449deafd50cc031ca257e0b194a650a912090f",
+        "message_hash": "0xeb4221181ff3f1a83ea7313993ca9218496e424604ba9492bb4052c03d5c3df8"
     }
 }
