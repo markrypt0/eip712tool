@@ -4,5 +4,10 @@
     },
     "primaryType": "EIP712Domain",
     "message": {},
-    "domain": {}
+    "domain": {},
+    "results": {
+        "test_data": "bare_minimum",
+        "message_hash": null,
+        "domain_separator_hash": "0x6192106f129ce05c9075d319c1fa6ea9b3ae37cbd0c1ef92e2be7137bb07baa1"
+    }
 }

@@ -66,5 +66,10 @@
             }
         ],
         "contents": "Hello, guys!"
+    },
+    "results": {
+        "test_data": "struct_list_v4",
+        "message_hash": "0xc16c4b0b9a45a8e9c34c4074d8deb589686f7de3b83e80596ec79f815a17276e",
+        "domain_separator_hash": "0x97d6f53774b810fbda27e091c03c6a6d6815dd1270c2e62e82c6917c1eff774b"
     }
 }
