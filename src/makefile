@@ -1,6 +1,6 @@
 
 CC = gcc
-CFLAGS = -std=c99 -Wall -pedantic -g -O0
+CFLAGS = -std=c99 -Wall -pedantic -g -O0 -fstack-usage
 
 src = $(wildcard *.c)
 src += $(wildcard ../*.c)

@@ -1,0 +1,8 @@
+./eip712.exe array_of_structs.json
+./eip712.exe bare_minimum.json
+./eip712.exe basic_data.json
+./eip712.exe complex_data.json
+./eip712.exe full_dom_empty_msg.json
+./eip712.exe metamask_array_of_structs.json
+./eip712.exe struct_list_v4.json
+./eip712.exe structs_array_v4.json
