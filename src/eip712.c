@@ -23,7 +23,10 @@
     See https://github.com/MetaMask/eth-sig-util/pull/107
 
     eip712 data rules:
-    Json parser requires all complete json message strings to be enclosed by braces, i.e., "{ ... }"
+    Parser wants to see C strings, not javascript strings:
+        requires all complete json message strings to be enclosed by braces, i.e., { ... }
+        Cannot have entire json string quoted, i.e., "{ ... }" will not work.
+        Remove all quote escape chars, e.g., {"types":  not  {\"types\":
     int values must be hex. Negative sign indicates negative value, e.g., -5, -8a67 
         Note: Do not prefix ints or uints with 0x
     All hex and byte strings must be big-endian
@@ -39,21 +42,13 @@
 #include "./sha3.h"
 #include "./memzero.h"
 
+// eip712tool specific defines
 //#define DISPLAY_INTERMEDIATES 1     // define this to display intermediate hash results
-
-
 #define BUFSIZE             4000
 #define PRIMETYPE_BUFSIZE    80
 #define DOMAIN_BUFSIZE      300
 #define MESSAGE_BUFSIZE     2000
-#define TYPES_BUFSIZE       2000+MESSAGE_BUFSIZE    // This will be used as the types,values concatenated string
-                                                    // For instance, types+domain or types+message
-
-#define JSON_OBJ_POOL_SIZE  100
-#define STRBUFSIZE          511
-#define MAX_USERDEF_TYPES   10      // This is max number of user defined type allowed
-#define MAX_TYPESTRING      33      // maximum size for a type string
-
+#define TYPES_BUFSIZE       2000                    // This will be used as the types,values concatenated string
 // Example
 // DEBUG_DISPLAY_VAL("sig", "sig %s", 65, resp->signature.bytes[ctr]);
 #define DEBUG_DISPLAY_VAL(TITLE,VALNAME,SIZE,BYTES) \
@@ -67,6 +62,13 @@
   /*(void)review(ButtonRequestType_ButtonRequest_Other, TITLE,*/\
   /*             VALNAME, str);*/\
 }
+
+// These defines will be used in firmware 
+#define ADDRESS_SIZE        42
+#define JSON_OBJ_POOL_SIZE  100
+#define STRBUFSIZE          511
+#define MAX_USERDEF_TYPES   10      // This is max number of user defined type allowed
+#define MAX_TYPESTRING      33      // maximum size for a type string
 
 typedef enum {
     NOT_ENCODABLE = 0,
@@ -130,7 +132,7 @@ int encodableType(const char *typeStr) {
             if (0 == strncmp(udefList[ctr], typeNoArrTok, strlen(udefList[ctr])-strlen(typeNoArrTok))) {
                 return PREV_USERDEF;
             }
-            else;
+            else {}
 
         } else {
             udefList[ctr] = typeStr;
@@ -218,14 +220,13 @@ int parseType(const json_t *eip712Types, const char *typeS, char *typeStr) {
         // append paren, there are no parameters
         strncat(typeStr, ")", STRBUFSIZE - 1);
     }
-    if (strlen(append) >= 0) {
+    if (strlen(append) > 0) {
         strncat(typeStr, append, STRBUFSIZE - strlen((const char *)append));
     }
 
     return 1;
 }
 
-#define ADDRESS_SIZE    42
 int encAddress(const char *string, uint8_t *encoded) {
     unsigned ctr;
     char byteStrBuf[3] = {0};
@@ -320,17 +321,27 @@ int encodeBytesN(const char *typeT, const char *string, uint8_t *encoded) {
     return 1;
 }
 
+int confirmName(const char *name) {
+    printf("\nConfirm\n%s ", name);
+    return 1;
+}
+int confirmValue(const char *value) {
+    printf("%s\n", value);
+    return 1;
+}
+
 /*
     Entry: 
             eip712Types points to the eip712 types structure
             jType points to eip712 json type structure to parse
             nextVal points to the next value to encode
-            msgCtx points to caller allocated hash context to hash encoded values into.
+            msgCtx points to caller allocated hash context to hash encoded values into
     Exit:  
             msgCtx points to current final hash context
 
     NOTE: reentrant!
 */
+
 int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *nextVal, struct SHA3_CTX *msgCtx) {
     json_t const *tarray, *pairs, *walkVals;
     int ctr;
@@ -359,8 +370,12 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                     walkVals = json_getSibling(walkVals);
                 }
             }
+
+            confirmName(typeName);
+
             if (walkVals == 0) {
                 printf("error: value for \"%s\" not found!\n", typeName);
+
 
             } else {
 
@@ -574,6 +589,13 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                     }                         
                 }
             }
+
+            if (JSON_TEXT == json_getType(walkVals) || JSON_INTEGER == json_getType(walkVals)) {
+                confirmValue(valStr);
+            } else {
+                // this means there is complex json data, i.e., values that are bracketed pairs to be parsed
+            }
+
             // hash encoded bytes to final context
             sha3_Update(msgCtx, (const unsigned char *)encBytes, 32);
         }
@@ -584,6 +606,8 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
     }
     return 1;
 }
+
+
 
 
 int encode(const json_t *jsonTypes, const json_t *jsonVals, const char *typeS, uint8_t *hashRet) {
@@ -642,38 +666,61 @@ int encode(const json_t *jsonTypes, const json_t *jsonVals, const char *typeS, u
 
 
 int parseJsonName(char *name, char *jsonMsg, char *parsedJson, unsigned maxParsedSize) {
-    char *secStart, *brack, *brackTest;
+    char *secStart, *brack, *brackTest, *typeEnd;
     unsigned brackLevel, parsedSize;
     
     if (NULL == (secStart = strstr(jsonMsg, name))) {
         printf("%s not found!\n", name);
         return 0;
     }
-    brackLevel = 1;
-    brack = strstr(secStart, "{");
-    while (brackLevel > 0) {
-        brackTest = strpbrk(brack+1, "{}");
-        if ('{' == *brackTest) {
-            brackLevel++;
-        } else if ('}' == *brackTest) {
-            brackLevel--;
-        } else if (0 == brackTest) {
-            printf("can't parse %s value!\n", name);
+
+    if (0 != strncmp(name, "\"primaryType\"", strlen(name))) {
+        brackLevel = 1;
+        brack = strstr(secStart, "{");
+        while (brackLevel > 0) {
+            brackTest = strpbrk(brack+1, "{}");
+            if ('{' == *brackTest) {
+                brackLevel++;
+            } else if ('}' == *brackTest) {
+                brackLevel--;
+            } else if (0 == brackTest) {
+                printf("can't parse %s value!\n", name);
+                return 0;
+            }
+            brack = brackTest;
+        }
+
+        parsedSize = brack-secStart+1;
+        if (parsedSize+2 > maxParsedSize) {
+            printf("parsed size is %u, larger than max allowed %u\n", parsedSize, maxParsedSize);
             return 0;
         }
-        brack = brackTest;
-    }
-    
-    parsedSize = brack-secStart+1;
-    if (parsedSize+2 > maxParsedSize) {
-        printf("parsed size is %u, larger than max allowed %u\n", parsedSize, maxParsedSize);
-        return 0;
-    }
 
-    // json parser wants to see string json string enclosed in braces, i.e., "{ ... }"
-    strcat(parsedJson, "{\0");
-    strncpy(&parsedJson[strlen(parsedJson)], secStart, parsedSize);
-    strcat(parsedJson, "}\0");
+        // json parser wants to see string json string enclosed in braces, i.e., "{ ... }"
+        strcat(parsedJson, "{\0");
+        strncpy(&parsedJson[strlen(parsedJson)], secStart, parsedSize);
+        strcat(parsedJson, "}\0");
+
+    } else {
+        // primary type parsing is different
+        typeEnd = strpbrk(secStart, ",\n");
+        if (typeEnd == NULL) {
+            printf("parsed size of primaryType is NULL!\n");
+            return 0;
+        }
+        if (PRIMETYPE_BUFSIZE < (parsedSize = typeEnd-secStart)) {
+            printf("primaryType parsed size is %u, greater than max size allowed %u\n", parsedSize, PRIMETYPE_BUFSIZE);
+            return 0;
+        }
+        // json parser wants to see string json string enclosed in braces, i.e., "{ ... }"
+
+        strcat(parsedJson, "{\0");
+        strncpy(&parsedJson[strlen(parsedJson)], secStart, parsedSize);
+        if (parsedJson[parsedSize] == ',') {
+            parsedJson[parsedSize-1] = 0;
+        }
+        strcat(parsedJson, "}\0");
+    }
     return 1;
 }
 
@@ -715,36 +762,13 @@ int main(int argc, char *argv[]) {
     //printf("%s\n\n", domainJsonStr);
     parseJsonName("\"message\"", jsonStr, messageJsonStr, MESSAGE_BUFSIZE);
     //printf("%s\n\n", messageJsonStr);
-
-    // primaryType entry assumed to be just a single name,value pair
-    char *secStart, *typeEnd;
-    unsigned parsedSize;
-    if (NULL == (secStart = strstr(jsonStr, "\"primaryType\""))) {
-        printf("primaryType not found!\n");
-        return 0;
-    }
-    typeEnd = strpbrk(secStart, ",\n");
-    if (typeEnd == NULL) {
-        printf("parsed size of primaryType is NULL!\n");
-        return 0;
-    }
-    if (PRIMETYPE_BUFSIZE < (parsedSize = typeEnd-secStart)) {
-        printf("primaryType parsed size is %u, greater than max size allowed %u\n", parsedSize, PRIMETYPE_BUFSIZE);
-        return 0;
-    }
-    // json parser wants to see string json string enclosed in braces, i.e., "{ ... }"
-
-    strcat(primaryTypeJsonStr, "{\0");
-    strncpy(&primaryTypeJsonStr[strlen(primaryTypeJsonStr)], secStart, parsedSize);
-    if (primaryTypeJsonStr[parsedSize] == ',') {
-        primaryTypeJsonStr[parsedSize-1] = 0;
-    }
-    strcat(primaryTypeJsonStr, "}\0");
+    parseJsonName("\"primaryType\"", jsonStr, primaryTypeJsonStr, MESSAGE_BUFSIZE);
+    //printf("%s\n\n", messageJsonStr);
 
     json_t mem[JSON_OBJ_POOL_SIZE];
     json = json_create(jsonStr, mem, sizeof mem / sizeof *mem );
     if ( !json ) {
-        printf("Error json create, errno = %d.", errno);
+        printf("Error json create json, errno = %d.", errno);
         return EXIT_FAILURE;
     }
 
@@ -773,8 +797,12 @@ int main(int argc, char *argv[]) {
     json_t memPType[4];
     jsonT = json_create(typesJsonStr, memTypes, sizeof memTypes / sizeof *memTypes );
     jsonV = json_create(domainJsonStr, memVals, sizeof memVals / sizeof *memVals );
-    if ( !jsonT || !jsonV ) {
-        printf("Error json create, errno = %d.", errno);
+    if ( !jsonT ) {
+        printf("Error json create jsonT, errno = %d.", errno);
+        return EXIT_FAILURE;
+    }
+    if ( !jsonV ) {
+        printf("Error json create jsonV, errno = %d.", errno);
         return EXIT_FAILURE;
     }
 
@@ -802,8 +830,12 @@ int main(int argc, char *argv[]) {
 
     jsonV = json_create(messageJsonStr, memVals, sizeof memVals / sizeof *memVals );
     jsonPT = json_create(primaryTypeJsonStr, memPType, sizeof memPType / sizeof *memPType );
-    if ( !jsonT || !jsonV || !jsonPT) {
-        printf("Error json create, errno = %d.", errno);
+    if ( !jsonV ) {
+        printf("Error json create second jsonV, errno = %d.", errno);
+        return EXIT_FAILURE;
+    }
+    if ( !jsonPT) {
+        printf("Error json create jsonPT, errno = %d.", errno);
         return EXIT_FAILURE;
     }
 
