@@ -26,7 +26,7 @@
     "primaryType": "EIP712Domain",
     "message": {},
     "domain": {
-        "name": "Trezor",
+        "name": "Keepkey",
         "version": "Test v0.0.0",
         "chainId": 1,
         "verifyingContract": "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC",
@@ -35,7 +35,7 @@
     "results": {
         "test_data": "full_domain_empty_message",
         "message_hash": null,
-        "domain_separator_hash": "0xf85aaf157e9a36dc6e12643fff450fdf8d98fd0d0e41c5b42bb1f7aae6c83388"
+        "domain_separator_hash": "0x2cfb61306c0d1212d7c4f5acf89c9b8df3c85b19f9d87d08547cb9cee9f73b2b"
     }
 }
 
