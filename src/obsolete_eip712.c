@@ -18,7 +18,7 @@
 
 
 /* 
-    Produces hashes based on the metamask v4 rules. This is different from the EIP-712 spec
+    This tool produces hashes based on the metamask v4 rules. This is different from the EIP-712 spec
     in how arrays of structs are hashed but is compatable with metamask.
     See https://github.com/MetaMask/eth-sig-util/pull/107
 
@@ -36,33 +36,48 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "./colors.h"
+#define USE_KECCAK 1
+
 #include "keepkey/board/confirm_sm.h"
-#include "keepkey/firmware/eip712.h"
+//#include "keepkey/firmware/eip712.h"
 #include "keepkey/firmware/tiny-json.h"
 #include "trezor/crypto/sha3.h"
 #include "trezor/crypto/memzero.h"
 
-extern unsigned end;    // This is at the end of the data + bss, used for recursion guard
-static const char *udefList[MAX_USERDEF_TYPES] = {0};
-static dm confirmProp;
-static char *confirmTitle[2] = {
-                                "EIP-712 DOMAIN", 
-                                "EIP-712 MESSAGE"
-                                };
+// eip712tool specific defines
+//#define DISPLAY_INTERMEDIATES 1     // define this to display intermediate hash results
+#define BUFSIZE             4000
+#define PRIMETYPE_BUFSIZE    80
+#define DOMAIN_BUFSIZE      300
+#define MESSAGE_BUFSIZE     2000
+#define TYPES_BUFSIZE       2000                    // This will be used as the types,values concatenated string
+// Example
+// DEBUG_DISPLAY_VAL("sig", "sig %s", 65, resp->signature.bytes[ctr]);
 
-static const char *nameForValue;
 
-int memcheck() {
-    // char buf[33] = {0};
-    void *stackBottom;    // this is the bottom of the stack, it is shrinking toward static mem at variable "end".
-    // snprintf(buf, 64, "RAM available %u", (unsigned)&stackBottom - (unsigned)&end);
-    // DEBUG_DISPLAY(buf);
-    if (STACK_SIZE_GUARD > ((unsigned)&stackBottom - (unsigned)&end)) {
-        return RECURSION_ERROR;
-    } else {
-        return SUCCESS;
-    }
-}
+// These defines will be used in firmware 
+#define ADDRESS_SIZE        42
+#define JSON_OBJ_POOL_SIZE  100
+#define STRBUFSIZE          511
+#define MAX_USERDEF_TYPES   10      // This is max number of user defined type allowed
+#define MAX_TYPESTRING      33      // maximum size for a type string
+
+typedef enum {
+    NOT_ENCODABLE = 0,
+    ADDRESS,
+    STRING,
+    UINT,
+    INT,
+    BYTES,
+    BYTES_N,
+    BOOL,
+    UDEF_TYPE,
+    PREV_USERDEF,
+    TOO_MANY_UDEFS
+} basicType;
+
+const char *udefList[MAX_USERDEF_TYPES] = {0};
 
 int encodableType(const char *typeStr) {
     int ctr;
@@ -118,7 +133,7 @@ int encodableType(const char *typeStr) {
         }
     }
     if (ctr == MAX_USERDEF_TYPES) {
-        //TODO fix this  printf("could not add %d %s\n", ctr, typeStr);
+        printf("could not add %d %s\n", ctr, typeStr);
         return TOO_MANY_UDEFS;
     }
 
@@ -132,7 +147,6 @@ int encodableType(const char *typeStr) {
             typeStr points to caller allocated, zeroized string buffer of size STRBUFSIZE+1
     Exit:  
             typeStr points to hashable type string
-            returns error list status
 
     NOTE: reentrant!
 */
@@ -142,80 +156,50 @@ int parseType(const json_t *eip712Types, const char *typeS, char *typeStr) {
     char append[STRBUFSIZE+1] = {0};
     int encTest;
     const char *typeType = NULL;
-    int errRet = SUCCESS;
-    const json_t *obTest;
-    const char *nameTest;
-    const char *pVal;
 
-    if (NULL == (jType = json_getProperty(eip712Types, typeS))) {
-        errRet = JSON_TYPE_S_ERR;
-        return errRet;
-    }
+    jType = json_getProperty(eip712Types, typeS);
 
-    if (NULL == (nameTest = json_getName(jType))) {
-        errRet = JSON_TYPE_S_NAMEERR;
-        return errRet;
-    }
-
-    strncat(typeStr, nameTest, STRBUFSIZE - strlen((const char *)typeStr));
+    strncat(typeStr, json_getName(jType), STRBUFSIZE - strlen((const char *)typeStr));
     strncat(typeStr, "(", STRBUFSIZE - strlen((const char *)typeStr));
 
     tarray = json_getChild(jType);
     while (tarray != 0) {
-        if (NULL == (pairs = json_getChild(tarray))) {
-            errRet = JSON_NO_PAIRS;
-            return errRet;
-        }
+        pairs = json_getChild(tarray);
         // should be type JSON_TEXT
         if (pairs->type != JSON_TEXT) {
-            errRet = JSON_PAIRS_NOTEXT;
-            return errRet;
+            printf("type %d not printable\n", pairs->type);
         } else {
-            if (NULL == (obTest = json_getSibling(pairs))) {
-                errRet = JSON_NO_PAIRS_SIB;
-                return errRet;
-            }
-            typeType = json_getValue(obTest);
+            typeType = json_getValue(json_getSibling(pairs));
             encTest = encodableType(typeType);
             if (encTest == UDEF_TYPE) {
+                #ifdef DISPLAY_INTERMEDIATES
+                printf("user defined type %s\n", typeType);
+                #endif
                 //This is a user-defined type, parse it and append later
                 if (']' == typeType[strlen(typeType)-1]) {
                     // array of structs. To parse name, remove array tokens.
                     char typeNoArrTok[MAX_TYPESTRING] = {0};
                     strncpy(typeNoArrTok, typeType, sizeof(typeNoArrTok)-1);
                     if (strlen(typeNoArrTok) < strlen(typeType)) {
-                        //TODO fix this  printf("ERROR: UDEF array type name is >32: %s, %lu\n", typeType, strlen(typeType));
-                        return UDEF_NAME_ERROR;
+                        printf("ERROR: UDEF array type name is >32: %s, %lu\n", typeType, strlen(typeType));
+                        return 0;
                     }
 
                     strtok(typeNoArrTok, "[");
-                    if (SUCCESS != (errRet = memcheck())) {
-                        return errRet;
-                    }
-                    if (SUCCESS != (errRet = parseType(eip712Types, typeNoArrTok, append))) {
-                        return errRet;
-                    }
+                    #ifdef DISPLAY_INTERMEDIATES
+                    printf("udef basic type %s\n", typeNoArrTok);
+                    #endif
+                    parseType(eip712Types, typeNoArrTok, append);
                 } else {
-                    if (SUCCESS != (errRet = memcheck())) {
-                        return errRet;
-                    }
-                    if (SUCCESS != (errRet = parseType(eip712Types, typeType, append))) {
-                        return errRet;
-                    }
+                parseType(eip712Types, typeType, append);
                 }
             } else if (encTest == TOO_MANY_UDEFS) {
-                return UDEFS_OVERFLOW;
-            } else if (encTest == NOT_ENCODABLE) {
-                return TYPE_NOT_ENCODABLE;
-            }
-
-            if (NULL == (pVal = json_getValue(pairs))) {
-                errRet = JSON_NOPAIRVAL;
-                return errRet;
-            }
-            strncat(typeStr, typeType, STRBUFSIZE - strlen((const char *)typeStr));
+                printf ("too many user defined types!");
+                return 0;
+            }             
+            strncat(typeStr, json_getValue(json_getSibling(pairs)), STRBUFSIZE - strlen((const char *)typeStr));
             strncat(typeStr, " ", STRBUFSIZE - strlen((const char *)typeStr));
-            strncat(typeStr, pVal, STRBUFSIZE - strlen((const char *)typeStr));
+            strncat(typeStr, json_getValue(pairs), STRBUFSIZE - strlen((const char *)typeStr));
             strncat(typeStr, ",", STRBUFSIZE - strlen((const char *)typeStr));
             
         }
@@ -233,18 +217,16 @@ int parseType(const json_t *eip712Types, const char *typeS, char *typeStr) {
         strncat(typeStr, append, STRBUFSIZE - strlen((const char *)append));
     }
 
-    return SUCCESS;
+    return 1;
 }
 
 int encAddress(const char *string, uint8_t *encoded) {
     unsigned ctr;
     char byteStrBuf[3] = {0};
 
-    if (string == NULL) {
-        return ADDR_STRING_NULL;
-    }
     if (ADDRESS_SIZE < strlen(string)) {
-        return ADDR_STRING_VFLOW;
+        printf("ERROR: Address string too big %lu\n", strlen(string));
+        return 0;
     }
 
     for (ctr=0; ctr<12; ctr++) {
@@ -254,16 +236,25 @@ int encAddress(const char *string, uint8_t *encoded) {
         strncpy(byteStrBuf, &string[2*((ctr-12))+2], 2);
         encoded[ctr] = (uint8_t)(strtol(byteStrBuf, NULL, 16));
     }
-    return SUCCESS;
+    #ifdef DISPLAY_INTERMEDIATES
+    DEBUG_DISPLAY_VAL("address", "addr %s", 65, encoded[ctr]);
+    #endif
+    return 1;
 }
 
 int encString(const char *string, uint8_t *encoded) {
     struct SHA3_CTX strCtx;
 
+    #ifdef DISPLAY_INTERMEDIATES
+    printf("string to be hashed: %s\n", string);
+    #endif
     sha3_256_Init(&strCtx);
     sha3_Update(&strCtx, (const unsigned char *)string, (size_t)strlen(string));
     keccak_Final(&strCtx, encoded);
-    return SUCCESS;
+    #ifdef DISPLAY_INTERMEDIATES
+    DEBUG_DISPLAY_VAL("string", "hash %s", 65, encoded[ctr]);
+    #endif
+    return 1;
 }
 
 int encodeBytes(const char *string, uint8_t *encoded) {
@@ -282,49 +273,59 @@ int encodeBytes(const char *string, uint8_t *encoded) {
         valStrPtr+=2;
     }
     keccak_Final(&byteCtx, encoded);
-    return SUCCESS;
+    #ifdef DISPLAY_INTERMEDIATES
+    DEBUG_DISPLAY_VAL("bytes", "hash %s", 65, encoded[ctr]);
+    #endif
+    return 1;
 }
 
+#define MAX_ENCBYTEN_SIZE   66
 int encodeBytesN(const char *typeT, const char *string, uint8_t *encoded) {
     char byteStrBuf[3] = {0};
     unsigned ctr;
 
     if (MAX_ENCBYTEN_SIZE < strlen(string)) {
-        //TODO fix this  printf("ERROR: bytesN string too big %lu\n", strlen(string));
-        return BYTESN_STRING_ERROR;
+        printf("ERROR: bytesN string too big %lu\n", strlen(string));
+        return 0;
     }
 
     // parse out the length val
     uint8_t byteTypeSize = (uint8_t)(strtol((typeT+5), NULL, 10));
     if (32 < byteTypeSize) {
-        //TODO fix this  printf("byteN size error, N>32:%u/n", byteTypeSize);
-        return BYTESN_SIZE_ERROR;
+        printf("byteN size error, N>32:%u/n", byteTypeSize);
+        return(0);
     }
     for (ctr=0; ctr<32; ctr++) {
         // zero padding
         encoded[ctr] = 0;
     }
     unsigned zeroFillLen = 32 - ((strlen(string)-2/* skip '0x' */)/2);
+    #ifdef DISPLAY_INTERMEDIATES
+    printf("bytes%u: %s, zf=%u\n", byteTypeSize, string, zeroFillLen);
+    #endif
     // bytesN are zero padded on the right
     for (ctr=zeroFillLen; ctr<32; ctr++) {
         strncpy(byteStrBuf, &string[2+2*(ctr-zeroFillLen)], 2);
         encoded[ctr-zeroFillLen] = (uint8_t)(strtol(byteStrBuf, NULL, 16));
     }
-    return SUCCESS;
+    #ifdef DISPLAY_INTERMEDIATES
+    DEBUG_DISPLAY_VAL("bytesN", "val  %s", 65, encoded[ctr]);
+    #endif
+    return 1;
 }
 
 int confirmName(const char *name, bool valAvailable) {
     if (valAvailable) {
-        nameForValue = name;
+        printf("\nConfirm\n%s ", name);
     } else {
-        (void)review(ButtonRequestType_ButtonRequest_Other, confirmTitle[confirmProp-1], "Press button to continue for\n\"%s\" values", name);
+        printf("\"%s\" values, press button to continue\n", name);
     }
-    return SUCCESS;
+    return 1;
 }
 
 int confirmValue(const char *value) {
-    (void)review(ButtonRequestType_ButtonRequest_Other, confirmTitle[confirmProp-1], "%s %s", nameForValue, value);
-    return SUCCESS;
+    printf("%s\n", value);
+    return 1;
 }
 
 /*
@@ -332,15 +333,15 @@ int confirmValue(const char *value) {
             eip712Types points to the eip712 types structure
             jType points to eip712 json type structure to parse
             nextVal points to the next value to encode
-            msgCtx points to caller allocated hash context to hash encoded values into.
+            msgCtx points to caller allocated hash context to hash encoded values into
     Exit:  
             msgCtx points to current final hash context
-            returns error status
 
     NOTE: reentrant!
 */
+
 int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *nextVal, struct SHA3_CTX *msgCtx) {
-    json_t const *tarray, *pairs, *walkVals, *obTest;
+    json_t const *tarray, *pairs, *walkVals;
     int ctr;
     const char *typeName = NULL, *typeType = NULL;
     uint8_t encBytes[32] = {0};     // holds the encrypted bytes for the message
@@ -348,32 +349,16 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
     char byteStrBuf[3] = {0};
     struct SHA3_CTX valCtx = {0};   // local hash context
     bool hasValue = 0;
-    int errRet = SUCCESS;
 
     tarray = json_getChild(jType);
-
     while (tarray != 0) {
-        if (NULL == (pairs = json_getChild(tarray))) {
-            errRet = JSON_NO_PAIRS;
-            return errRet;
-        }
+        pairs = json_getChild(tarray);
         // should be type JSON_TEXT
         if (pairs->type != JSON_TEXT) {
-            errRet = JSON_PAIRS_NOTEXT;
-            return errRet;
+            printf("type %d not printable\n", pairs->type);
         } else {
-            if (NULL == (typeName = json_getValue(pairs))) {
-                errRet = JSON_NOPAIRNAME;
-                return errRet;
-            }
-            if (NULL == (obTest = json_getSibling(pairs))) {
-                errRet = JSON_NO_PAIRS_SIB;
-                return errRet;
-            }
-            if (NULL == (typeType = json_getValue(obTest))) {
-                errRet = JSON_TYPE_T_NOVAL;
-                return errRet;
-            }
+            typeName = json_getValue(pairs);
+            typeType = json_getValue(json_getSibling(pairs));
             walkVals = nextVal;
             while (0 != walkVals) {
                 if (0 == strcmp(json_getName(walkVals), typeName)) {
@@ -393,8 +378,9 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
             confirmName(typeName, hasValue);
 
             if (walkVals == 0) {
-                errRet = JSON_TYPE_WNOVAL;
-                return errRet;
+                printf("error: value for \"%s\" not found!\n", typeName);
+
+
             } else {
 
                 if (0 == strncmp("address", typeType, strlen("address")-1)) {
@@ -405,21 +391,18 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         while (0 != addrVals) {
                             // just walk the string values assuming, for fixed sizes, all values are there.
                             confirmValue(json_getValue(addrVals));
-                            errRet = encAddress(json_getValue(addrVals), encBytes);
-                            if (SUCCESS != errRet) {
-                                return errRet;
-                            }
+                            encAddress(json_getValue(addrVals), encBytes);
                             sha3_Update(&valCtx, (const unsigned char *)encBytes, 32);
                             addrVals = json_getSibling(addrVals);
                         }
                         keccak_Final(&valCtx, encBytes);
                     } else {
                         confirmValue(valStr);
-                        errRet = encAddress(valStr, encBytes);
-                        if (SUCCESS != errRet) {
-                            return errRet;
-                        }
+                        encAddress(valStr, encBytes);
                     }
+                    #ifdef DISPLAY_INTERMEDIATES
+                    DEBUG_DISPLAY_VAL("address final", "hash %s", 65, encBytes[ctr]);
+                    #endif
 
                 } else if (0 == strncmp("string", typeType, strlen("string")-1)) {
                     if (']' == typeType[strlen(typeType)-1]) {
@@ -430,37 +413,47 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         while (0 != stringVals) {
                             // just walk the string values assuming, for fixed sizes, all values are there.
                             confirmValue(json_getValue(stringVals));
-                            errRet = encString(json_getValue(stringVals), strEncBytes);
-                            if (SUCCESS != errRet) {
-                                return errRet;
-                            }
+                            #ifdef DISPLAY_INTERMEDIATES
+                            printf("  array ");
+                            #endif
+                            encString(json_getValue(stringVals), strEncBytes);
                             sha3_Update(&valCtx, (const unsigned char *)strEncBytes, 32);
                             stringVals = json_getSibling(stringVals);
                         }
                         keccak_Final(&valCtx, encBytes);
                     } else {
                         confirmValue(valStr);
-                        errRet = encString(valStr, encBytes);
-                        if (SUCCESS != errRet) {
-                            return errRet;
-                        }
+                        encString(valStr, encBytes);
                     }
+                    #ifdef DISPLAY_INTERMEDIATES
+                    DEBUG_DISPLAY_VAL("string final", "hash %s", 65, encBytes[ctr]);
+                    #endif
 
                 } else if ((0 == strncmp("uint", typeType, strlen("uint")-1)) ||
                            (0 == strncmp("int", typeType, strlen("int")-1))) {
 
                     if (']' == typeType[strlen(typeType)-1]) {
-                        //TODO fix this  printf("ERROR: INT and UINT arrays not yet implemented\n");
-                        return INT_ARRAY_ERROR;
+                        printf("ERROR: INT and UINT arrays not yet implemented\n");
+                        return 0;
                     } else {
                         confirmValue(valStr);
+                        #ifdef DISPLAY_INTERMEDIATES
+                        uint8_t intType = 0;    // 0 is uint, 1 is int, for displaying intermediate
+                        #endif
                         uint8_t negInt = 0;     // 0 is positive, 1 is negative
                         if (0 == strncmp("int", typeType, strlen("int")-1)) {
+                            #ifdef DISPLAY_INTERMEDIATES
+                            intType = 1;
+                            #endif
                             if (*valStr == '-') {
                                 negInt = 1;
                             }
                         }
                         // parse out the length val
+                        #ifdef DISPLAY_INTERMEDIATES
+                        uint16_t intuTypeSize = (uint16_t)(strtol((typeType+4-intType), NULL, 10));
+                        printf("intu%u: %s typeType %s, intType %u, negint %u, typesizstr %s\n", intuTypeSize, valStr, typeType, intType, negInt, (typeType+4-intType));
+                        #endif
                         for (ctr=0; ctr<32; ctr++) {
                             if (negInt) {
                                 // sign extend negative values
@@ -471,39 +464,45 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                             }
                         }
                         unsigned zeroFillLen = 32 - ((strlen(valStr)-negInt)/2+1);
+                        #ifdef DISPLAY_INTERMEDIATES
+                        printf("intu%u: valstr %s, zf=%u\n", intuTypeSize, valStr, zeroFillLen);
+                        #endif
                         for (ctr=zeroFillLen; ctr<32; ctr++) {
                             strncpy(byteStrBuf, &valStr[2*(ctr-(zeroFillLen))], 2);
                             encBytes[ctr] = (uint8_t)(strtol(byteStrBuf, NULL, 16));
                         }
-                   }
+                        #ifdef DISPLAY_INTERMEDIATES
+                        DEBUG_DISPLAY_VAL("uintN", "val  %s", 65, encBytes[ctr]);
+                        #endif
+                    }
 
                 } else if (0 == strncmp("bytes", typeType, strlen("bytes"))) {
                     if (']' == typeType[strlen(typeType)-1]) {
-                        //TODO fix this  printf("ERROR: bytesN arrays not yet implemented\n");
-                        return BYTESN_ARRAY_ERROR;
+                        printf("ERROR: bytesN arrays not yet implemented\n");
+                        return 0;
                     } else {
                         // This could be 'bytes', 'bytes1', ..., 'bytes32'
                         confirmValue(valStr);
                         if (0 == strcmp(typeType, "bytes")) {
-                           errRet = encodeBytes(valStr, encBytes);
-                        if (SUCCESS != errRet) {
-                            return errRet;
-                        }
+                            #ifdef DISPLAY_INTERMEDIATES
+                            printf("bytes to be hashed: %s\n", valStr+2);
+                            #endif
+                            encodeBytes(valStr, encBytes);
 
                         } else {
-                            errRet = encodeBytesN(typeType, valStr, encBytes);
-                            if (SUCCESS != errRet) {
-                                return errRet;
-                            }
+                            encodeBytesN(typeType, valStr, encBytes);
                         }
                     }
 
                 } else if (0 == strncmp("bool", typeType, strlen(typeType))) {
                     if (']' == typeType[strlen(typeType)-1]) {
-                        //TODO fix this  printf("ERROR: bool arrays not yet implemented\n");
-                        return BOOL_ARRAY_ERROR;
+                        printf("ERROR: bool arrays not yet implemented\n");
+                        return 0;
                     } else {
                         confirmValue(valStr);
+                        #ifdef DISPLAY_INTERMEDIATES
+                        printf("bool: %s\n", valStr);
+                        #endif
                         for (ctr=0; ctr<32; ctr++) {
                             // leading zeros in bool
                             encBytes[ctr] = 0;
@@ -511,6 +510,9 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         if (0 == strncmp(valStr, "true", sizeof("true"))) {
                             encBytes[31] = 0x01;
                         }
+                        #ifdef DISPLAY_INTERMEDIATES
+                        DEBUG_DISPLAY_VAL("bool", "val  %s", 65, encBytes[ctr]);
+                        #endif
                     }
  
                 } else {
@@ -527,28 +529,27 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         // array of structs. To parse name, remove array tokens.
                         strncpy(typeNoArrTok, typeType, sizeof(typeNoArrTok)-1);
                         if (strlen(typeNoArrTok) < strlen(typeType)) {
-                            //TODO fix this  printf("ERROR: UDEF array type name is >32: %s, %lu\n", typeType, strlen(typeType));
-                            return UDEF_ARRAY_NAME_ERR;
+                            printf("ERROR: UDEF array type name is >32: %s, %lu\n", typeType, strlen(typeType));
+                            return 0;
                         }
                         strtok(typeNoArrTok, "[");
-                        if (SUCCESS != (errRet = memcheck())) {
-                            return errRet;
-                        }
-                        if (SUCCESS != (errRet = parseType(eip712Types, typeNoArrTok, encSubTypeStr))) {
-                            return errRet;
-                        }
+                        #ifdef DISPLAY_INTERMEDIATES
+                        printf("udef basic type %s\n", typeNoArrTok);
+                        #endif
+                        parseType(eip712Types, typeNoArrTok, encSubTypeStr);
                     } else {
-                        if (SUCCESS != (errRet = memcheck())) {
-                            return errRet;
-                        }
-                        if (SUCCESS != (errRet = parseType(eip712Types, typeType, encSubTypeStr))) {
-                            return errRet;
-                        }
+                        parseType(eip712Types, typeType, encSubTypeStr);
                     }
+                    #ifdef DISPLAY_INTERMEDIATES
+                    printf("udef typehash string %s\n", encSubTypeStr);
+                    #endif
                     sha3_256_Init(&valCtx);
                     sha3_Update(&valCtx, (const unsigned char *)encSubTypeStr, (size_t)strlen(encSubTypeStr));
                     keccak_Final(&valCtx, encBytes);
- 
+                    #ifdef DISPLAY_INTERMEDIATES
+                    DEBUG_DISPLAY_VAL(typeType, "hash %s", 65, encBytes[ctr]);
+                    #endif
+
                     if (']' == typeType[strlen(typeType)-1]) {
                         // array of udefs
                         struct SHA3_CTX eleCtx = {0};   // local hash context
@@ -559,45 +560,43 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
 
                         json_t const *udefVals = json_getChild(walkVals);
                         while (0 != udefVals) {
+                            #ifdef DISPLAY_INTERMEDIATES
+                            printf("  udef array ");
+                            #endif
                             sha3_256_Init(&eleCtx);
                             sha3_Update(&eleCtx, (const unsigned char *)encBytes, 32);
-                            if (SUCCESS != (errRet = memcheck())) {
-                                return errRet;
-                            }
-                            if (SUCCESS != (errRet = 
-                                parseVals(
+                            parseVals(
                                   eip712Types,
                                   json_getProperty(eip712Types, strtok(typeNoArrTok, "]")),
                                   json_getChild(udefVals),                // where to get the values
                                   &eleCtx                                 // encode hash happens in parse, this is the return
-                                  )
-                            )) {
-                                return errRet;
-                            }
+                                  );  
                             keccak_Final(&eleCtx, eleHashBytes);
+                            #ifdef DISPLAY_INTERMEDIATES
+                            DEBUG_DISPLAY_VAL(typeType, " array element hash %s", 65, eleHashBytes[ctr]);
+                            #endif
                             sha3_Update(&arrCtx, (const unsigned char *)eleHashBytes, 32);
                             // just walk the udef values assuming, for fixed sizes, all values are there.
                             udefVals = json_getSibling(udefVals);
                         } 
                         keccak_Final(&arrCtx, encBytes);
+                        #ifdef DISPLAY_INTERMEDIATES
+                        DEBUG_DISPLAY_VAL(typeType, "array hash %s", 65, encBytes[ctr]);
+                        #endif
 
                     } else {
                         sha3_256_Init(&valCtx);
                         sha3_Update(&valCtx, (const unsigned char *)encBytes, (size_t)sizeof(encBytes));
-                        if (SUCCESS != (errRet = memcheck())) {
-                            return errRet;
-                        }
-                        if (SUCCESS != (errRet = 
-                            parseVals(
+                        parseVals(
                                   eip712Types,
                                   json_getProperty(eip712Types, typeType),
                                   json_getChild(walkVals),                // where to get the values
                                   &valCtx           // val hash happens in parse, this is the return
-                                  )
-                        )) {
-                            return errRet;
-                        }    
+                                  );    
                         keccak_Final(&valCtx, encBytes);
+                        #ifdef DISPLAY_INTERMEDIATES
+                        DEBUG_DISPLAY_VAL(typeType, "hash %s", 65, encBytes[ctr]);
+                        #endif
                     }                         
                 }
             }
@@ -605,81 +604,271 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
             // hash encoded bytes to final context
             sha3_Update(msgCtx, (const unsigned char *)encBytes, 32);
         }
+        #ifdef DISPLAY_INTERMEDIATES
+        printf("\n");
+        #endif
         tarray = json_getSibling(tarray); 
     }
-    return SUCCESS;
+    return 1;
 }
+
+
+
 
 int encode(const json_t *jsonTypes, const json_t *jsonVals, const char *typeS, uint8_t *hashRet) {
     int ctr;
     char encTypeStr[STRBUFSIZE+1] = {0};
     uint8_t typeHash[32];
     struct SHA3_CTX finalCtx = {0};
-    int errRet;
-    json_t const *typesProp;
-    json_t const *typeSprop;
-    json_t const *domainOrMessageProp;
-    json_t const *valsProp;
-    char *domOrMsgStr = NULL;
 
     // clear out the user-defined types list
     for(ctr=0; ctr<MAX_USERDEF_TYPES; ctr++) {
         udefList[ctr] = NULL;
     }  
-    if (NULL == (typesProp = json_getProperty(jsonTypes, "types"))) {
-        errRet = JSON_TYPESPROPERR;
-        return errRet;
-    }
-    if (SUCCESS != (errRet = 
-        parseType(typesProp, typeS, encTypeStr)
-    )) {
-        return errRet;
-    }     
 
+    parseType(json_getProperty(jsonTypes, "types"), typeS,   // e.g., "EIP712Domain"
+              encTypeStr                                      // will return with typestr
+              );                                                            
+    #ifdef DISPLAY_INTERMEDIATES
+    printf("%lu %s\n", strlen(encTypeStr), encTypeStr);
+    #endif
     sha3_256_Init(&finalCtx);
     sha3_Update(&finalCtx, (const unsigned char *)encTypeStr, (size_t)strlen(encTypeStr));
     keccak_Final(&finalCtx, typeHash);
+    #ifdef DISPLAY_INTERMEDIATES
+    DEBUG_DISPLAY_VAL(typeS, "hash %s", 65, typeHash[ctr]);
+    #endif
 
     // They typehash must be the first message of the final hash, this is the start 
     sha3_256_Init(&finalCtx);
     sha3_Update(&finalCtx, (const unsigned char *)typeHash, (size_t)sizeof(typeHash));
-    
-    if (NULL == (typeSprop = json_getProperty(typesProp, typeS))) {                   // e.g., typeS = "EIP712Domain"
-        errRet = JSON_TYPESPROPERR;
-        return errRet;
-    }
 
     if (0 == strncmp(typeS, "EIP712Domain", sizeof("EIP712Domain"))) {
-        confirmProp = DOMAIN;
-        domOrMsgStr = "domain";
+        parseVals(json_getProperty(jsonTypes, "types"),
+              json_getProperty(json_getProperty(jsonTypes, "types"), typeS),   // e.g., "EIP712Domain" 
+              json_getChild(json_getProperty(jsonVals, "domain" )),                // where to get the values
+              &finalCtx                                                         // val hash happens in parse, this is the return
+              );
     } else {
         // This is the message value encoding
-        confirmProp = MESSAGE;
-        domOrMsgStr = "message";
-    }
-    if (NULL == (domainOrMessageProp = json_getProperty(jsonVals, domOrMsgStr))) {      // "message" or "domain" property
-        if (confirmProp == DOMAIN) {
-            errRet = JSON_DPROPERR;
-        } else {
-            errRet = JSON_MPROPERR;
+        if (NULL == json_getChild(json_getProperty(jsonVals, "message" ))) {
+            // return 2 for null message hash (this is a legal value)
+            return 2;
         }
-        return errRet;
-    } 
-    if (NULL == (valsProp = json_getChild(domainOrMessageProp))) {                    // "message" or "domain" property values
-        if (confirmProp == MESSAGE) {
-            errRet = NULL_MSG_HASH;         // this is legal, not an error.
-            return errRet;
-        }
-    } 
-
-    if (SUCCESS != (errRet = parseVals(typesProp, typeSprop, valsProp, &finalCtx))) {
-            return errRet;
+        parseVals(json_getProperty(jsonTypes, "types"),
+              json_getProperty(json_getProperty(jsonTypes, "types"), typeS),   // e.g., "EIP712Domain" 
+              json_getChild(json_getProperty(jsonVals, "message" )),                // where to get the values
+              &finalCtx                                                         // val hash happens in parse, this is the return
+              );
     }
 
     keccak_Final(&finalCtx, hashRet);
     // clear typeStr
     memzero(encTypeStr, sizeof(encTypeStr));
 
-    return SUCCESS;
+    return 1;
 }
 
+
+int parseJsonName(char *name, char *jsonMsg, char *parsedJson, unsigned maxParsedSize) {
+    char *secStart, *brack, *brackTest, *typeEnd;
+    unsigned brackLevel, parsedSize;
+    
+    if (NULL == (secStart = strstr(jsonMsg, name))) {
+        printf("%s not found!\n", name);
+        return 0;
+    }
+
+    if (0 != strncmp(name, "\"primaryType\"", strlen(name))) {
+        brackLevel = 1;
+        brack = strstr(secStart, "{");
+        while (brackLevel > 0) {
+            brackTest = strpbrk(brack+1, "{}");
+            if ('{' == *brackTest) {
+                brackLevel++;
+            } else if ('}' == *brackTest) {
+                brackLevel--;
+            } else if (0 == brackTest) {
+                printf("can't parse %s value!\n", name);
+                return 0;
+            }
+            brack = brackTest;
+        }
+
+        parsedSize = brack-secStart+1;
+        if (parsedSize+2 > maxParsedSize) {
+            printf("parsed size is %u, larger than max allowed %u\n", parsedSize, maxParsedSize);
+            return 0;
+        }
+
+        // json parser wants to see string json string enclosed in braces, i.e., "{ ... }"
+        strcat(parsedJson, "{\0");
+        strncpy(&parsedJson[strlen(parsedJson)], secStart, parsedSize);
+        strcat(parsedJson, "}\0");
+
+    } else {
+        // primary type parsing is different
+        typeEnd = strpbrk(secStart, ",\n");
+        if (typeEnd == NULL) {
+            printf("parsed size of primaryType is NULL!\n");
+            return 0;
+        }
+        if (PRIMETYPE_BUFSIZE < (parsedSize = typeEnd-secStart)) {
+            printf("primaryType parsed size is %u, greater than max size allowed %u\n", parsedSize, PRIMETYPE_BUFSIZE);
+            return 0;
+        }
+        // json parser wants to see string json string enclosed in braces, i.e., "{ ... }"
+
+        strcat(parsedJson, "{\0");
+        strncpy(&parsedJson[strlen(parsedJson)], secStart, parsedSize);
+        if (parsedJson[parsedSize] == ',') {
+            parsedJson[parsedSize-1] = 0;
+        }
+        strcat(parsedJson, "}\0");
+    }
+    return 1;
+}
+
+
+
+int main(int argc, char *argv[]) {
+
+    json_t const* json;
+    json_t const* jsonT;
+    json_t const* jsonV;
+    json_t const* jsonPT;
+
+    static char jsonStr[BUFSIZE] = {'\0'};
+    static char typesJsonStr[TYPES_BUFSIZE] = {'\0'};
+    static char primaryTypeJsonStr[PRIMETYPE_BUFSIZE] = {'\0'};
+    static char domainJsonStr[DOMAIN_BUFSIZE] = {'\0'};
+    static char messageJsonStr[MESSAGE_BUFSIZE] = {'\0'};
+    int chr, ctr;
+    FILE *f; 
+
+    // get file from cmd line or open default
+    if (NULL == (f = fopen(argv[1], "r"))) {
+        printf("USAGE: ./eip712.exe <filename>\n  Where <filename> is a properly formatted EIP-712 message.\n");
+        return 0;
+    }
+
+    // read in the json file
+    ctr=0;
+    chr = fgetc(f);
+    while (chr != EOF && ctr < BUFSIZE-1) {
+        jsonStr[ctr++] = chr;
+        chr = fgetc(f);
+    }
+    
+    // parse out the 4 sections
+    parseJsonName("\"types\"", jsonStr, typesJsonStr, TYPES_BUFSIZE);
+    printf("%s\n\n", typesJsonStr);
+    parseJsonName("\"domain\"", jsonStr, domainJsonStr, DOMAIN_BUFSIZE);
+    //printf("%s\n\n", domainJsonStr);
+    parseJsonName("\"message\"", jsonStr, messageJsonStr, MESSAGE_BUFSIZE);
+    //printf("%s\n\n", messageJsonStr);
+    parseJsonName("\"primaryType\"", jsonStr, primaryTypeJsonStr, MESSAGE_BUFSIZE);
+    //printf("%s\n\n", primaryTypeJsonStr);
+
+    json_t mem[JSON_OBJ_POOL_SIZE];
+    json = json_create(jsonStr, mem, sizeof mem / sizeof *mem );
+    if ( !json ) {
+        printf("Error json create json, errno = %d.", errno);
+        return EXIT_FAILURE;
+    }
+
+    const json_t *respair = json_getProperty(json, "results");
+    if (0 != respair) {
+        respair = json_getChild(respair);
+        const char *resval = json_getValue(respair);
+        while (0 != strncmp(json_getName(respair), "test_data", strlen(json_getName(respair)))) {
+            respair = json_getSibling(respair);
+            if (respair == 0) {
+                resval = "NO TEST DATA FILE NAME";
+                break;
+            } else {
+                resval = json_getValue(respair);
+            }
+        }
+        printf(BOLDRED "\nTest data file %s.json" RESET, resval);
+    } else {
+        printf(BOLDRED "\nNo \"results\" entry in json file" RESET);
+    }
+
+    // encode domain separator
+
+    json_t memTypes[JSON_OBJ_POOL_SIZE];
+    json_t memVals[JSON_OBJ_POOL_SIZE];
+    json_t memPType[4];
+    jsonT = json_create(typesJsonStr, memTypes, sizeof memTypes / sizeof *memTypes );
+    jsonV = json_create(domainJsonStr, memVals, sizeof memVals / sizeof *memVals );
+    if ( !jsonT ) {
+        printf("Error json create jsonT, errno = %d.", errno);
+        return EXIT_FAILURE;
+    }
+    if ( !jsonV ) {
+        printf("Error json create jsonV, errno = %d.", errno);
+        return EXIT_FAILURE;
+    }
+
+    uint8_t domainSeparator[32];
+    encode(jsonT, jsonV, "EIP712Domain", domainSeparator);
+    DEBUG_DISPLAY_VAL(BOLDGREEN "domainSeparator" RESET, "hash %s    ", 65, domainSeparator[ctr]);
+
+    respair = json_getProperty(json, "results");
+    if (0 != respair) {
+        respair = json_getChild(respair);
+        const char *resval = json_getValue(respair);
+        while (0 != strncmp(json_getName(respair), "domain_separator_hash", strlen(json_getName(respair)))) {
+            respair = json_getSibling(respair);
+            if (respair == 0) {
+                resval = "NOT FOUND IN TEST VECTOR FILE";
+                break;
+            } else {
+                resval = json_getValue(respair);
+            }
+        }
+        printf("Should be %s\n", resval);
+    }
+
+    // encode primaryType type
+
+    jsonV = json_create(messageJsonStr, memVals, sizeof memVals / sizeof *memVals );
+    jsonPT = json_create(primaryTypeJsonStr, memPType, sizeof memPType / sizeof *memPType );
+    if ( !jsonV ) {
+        printf("Error json create second jsonV, errno = %d.", errno);
+        return EXIT_FAILURE;
+    }
+    if ( !jsonPT) {
+        printf("Error json create jsonPT, errno = %d.", errno);
+        return EXIT_FAILURE;
+    }
+
+    uint8_t msgHash[32];
+    const char *primeType = json_getValue(json_getProperty(jsonPT, "primaryType"));
+
+    if (0 == strncmp(primeType, "EIP712Domain", strlen(primeType))) {
+        printf("primary type is EIP712Domain, message hash is NULL\n");
+    } else if (2 == encode(jsonT, jsonV, primeType, msgHash)) {
+        printf("message hash is NULL\n");
+    } else {
+        DEBUG_DISPLAY_VAL(BOLDGREEN "message" RESET, "hash %s    ", 65, msgHash[ctr]);
+    }
+    respair = json_getProperty(json, "results");
+    if (0 != respair) {
+        respair = json_getChild(respair);
+        const char *resval = json_getValue(respair);
+        while (0 != strncmp(json_getName(respair), "message_hash", strlen(json_getName(respair)))) {
+            respair = json_getSibling(respair);
+            if (respair == 0) {
+                resval = "NOT FOUND IN TEST VECTOR FILE";
+                break;
+            } else {
+                resval = json_getValue(respair);
+            }
+        }
+        printf("Should be %s\n", resval);
+    }
+
+    return EXIT_SUCCESS;
+}
