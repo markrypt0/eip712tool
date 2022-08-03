@@ -1,6 +1,6 @@
 
 CC = gcc
-CFLAGS = -std=c99 -Wall -pedantic -g -O0 -fstack-usage
+CFLAGS = -std=c99 -Wall -pedantic -g -O0 -fstack-usage -I./sim_include/
 
 src = $(wildcard *.c)
 src += $(wildcard ../*.c)
@@ -21,7 +21,7 @@ clean::
 eip712.exe: eip712.o sha3.o memzero.o tiny-json.o
 	gcc $(CFLAGS) -o $@ $^	
 
--include $(dep)
+-include $(dep);
 
 %.d: %.c
 	$(CC) $(CFLAGS) $< -MM -MT $(@:.d=.o) >$@

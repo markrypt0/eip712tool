@@ -37,10 +37,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "./colors.h"
-#include "./tiny-json.h"
 #define USE_KECCAK 1
-#include "./sha3.h"
-#include "./memzero.h"
+
+#include "keepkey/board/confirm_sm.h"
+//#include "keepkey/firmware/eip712.h"
+#include "keepkey/firmware/tiny-json.h"
+#include "trezor/crypto/sha3.h"
+#include "trezor/crypto/memzero.h"
 
 // eip712tool specific defines
 //#define DISPLAY_INTERMEDIATES 1     // define this to display intermediate hash results
@@ -51,17 +54,7 @@
 #define TYPES_BUFSIZE       2000                    // This will be used as the types,values concatenated string
 // Example
 // DEBUG_DISPLAY_VAL("sig", "sig %s", 65, resp->signature.bytes[ctr]);
-#define DEBUG_DISPLAY_VAL(TITLE,VALNAME,SIZE,BYTES) \
-{\
-  char str[SIZE+1];\
-  int ctr;\
-  for (ctr=0; ctr<SIZE/2; ctr++) {\
-    snprintf(&str[2*ctr], 3, "%02x", BYTES);\
-  }\
-  printf("\n%s\n%s %s\n", TITLE, VALNAME, str);\
-  /*(void)review(ButtonRequestType_ButtonRequest_Other, TITLE,*/\
-  /*             VALNAME, str);*/\
-}
+
 
 // These defines will be used in firmware 
 #define ADDRESS_SIZE        42

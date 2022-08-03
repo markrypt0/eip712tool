@@ -29,8 +29,9 @@
 
 #include <string.h>
 #include <ctype.h>
-#include "tiny-json.h"
-#include <stdio.h>
+#include "keepkey/firmware/tiny-json.h"
+
+//#include <stdio.h>
 
 int errno = 0;
 
@@ -357,7 +358,8 @@ static char* objValue( char* ptr, json_t* obj, jsonPool_t* pool ) {
         }
         json_t* property = pool->alloc( pool );
         if ( !property ) {
-            printf("err: pool size too small");
+            // TODO: fix this error return
+            //printf("err: pool size too small");
             return 0;
         }
         if( obj->type != JSON_ARRAY ) {
