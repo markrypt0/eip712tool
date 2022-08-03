@@ -769,13 +769,13 @@ int main(int argc, char *argv[]) {
     
     // parse out the 4 sections
     parseJsonName("\"types\"", jsonStr, typesJsonStr, TYPES_BUFSIZE);
-    //printf("%s\n\n", typesJsonStr);
+    printf("%s\n\n", typesJsonStr);
     parseJsonName("\"domain\"", jsonStr, domainJsonStr, DOMAIN_BUFSIZE);
     //printf("%s\n\n", domainJsonStr);
     parseJsonName("\"message\"", jsonStr, messageJsonStr, MESSAGE_BUFSIZE);
     //printf("%s\n\n", messageJsonStr);
     parseJsonName("\"primaryType\"", jsonStr, primaryTypeJsonStr, MESSAGE_BUFSIZE);
-    //printf("%s\n\n", messageJsonStr);
+    //printf("%s\n\n", primaryTypeJsonStr);
 
     json_t mem[JSON_OBJ_POOL_SIZE];
     json = json_create(jsonStr, mem, sizeof mem / sizeof *mem );
