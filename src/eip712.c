@@ -321,10 +321,15 @@ int encodeBytesN(const char *typeT, const char *string, uint8_t *encoded) {
     return 1;
 }
 
-int confirmName(const char *name) {
-    printf("\nConfirm\n%s ", name);
+int confirmName(const char *name, bool valAvailable) {
+    if (valAvailable) {
+        printf("\nConfirm\n%s ", name);
+    } else {
+        printf("\"%s\" values, press button to continue\n", name);
+    }
     return 1;
 }
+
 int confirmValue(const char *value) {
     printf("%s\n", value);
     return 1;
@@ -347,9 +352,10 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
     int ctr;
     const char *typeName = NULL, *typeType = NULL;
     uint8_t encBytes[32] = {0};     // holds the encrypted bytes for the message
-    const char *valStr;
+    const char *valStr = NULL;
     char byteStrBuf[3] = {0};
     struct SHA3_CTX valCtx = {0};   // local hash context
+    bool hasValue = 0;
 
     tarray = json_getChild(jType);
     while (tarray != 0) {
@@ -371,7 +377,12 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                 }
             }
 
-            confirmName(typeName);
+            if (JSON_TEXT == json_getType(walkVals) || JSON_INTEGER == json_getType(walkVals)) {
+                hasValue = 1;
+            } else {
+                hasValue = 0;
+            }
+            confirmName(typeName, hasValue);
 
             if (walkVals == 0) {
                 printf("error: value for \"%s\" not found!\n", typeName);
@@ -386,12 +397,14 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         sha3_256_Init(&valCtx);     // hash of concatenated encoded strings
                         while (0 != addrVals) {
                             // just walk the string values assuming, for fixed sizes, all values are there.
+                            confirmValue(json_getValue(addrVals));
                             encAddress(json_getValue(addrVals), encBytes);
                             sha3_Update(&valCtx, (const unsigned char *)encBytes, 32);
                             addrVals = json_getSibling(addrVals);
                         }
                         keccak_Final(&valCtx, encBytes);
                     } else {
+                        confirmValue(valStr);
                         encAddress(valStr, encBytes);
                     }
                     #ifdef DISPLAY_INTERMEDIATES
@@ -406,6 +419,7 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         sha3_256_Init(&valCtx);     // hash of concatenated encoded strings
                         while (0 != stringVals) {
                             // just walk the string values assuming, for fixed sizes, all values are there.
+                            confirmValue(json_getValue(stringVals));
                             #ifdef DISPLAY_INTERMEDIATES
                             printf("  array ");
                             #endif
@@ -415,6 +429,7 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         }
                         keccak_Final(&valCtx, encBytes);
                     } else {
+                        confirmValue(valStr);
                         encString(valStr, encBytes);
                     }
                     #ifdef DISPLAY_INTERMEDIATES
@@ -428,6 +443,7 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         printf("ERROR: INT and UINT arrays not yet implemented\n");
                         return 0;
                     } else {
+                        confirmValue(valStr);
                         #ifdef DISPLAY_INTERMEDIATES
                         uint8_t intType = 0;    // 0 is uint, 1 is int, for displaying intermediate
                         #endif
@@ -473,6 +489,7 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         return 0;
                     } else {
                         // This could be 'bytes', 'bytes1', ..., 'bytes32'
+                        confirmValue(valStr);
                         if (0 == strcmp(typeType, "bytes")) {
                             #ifdef DISPLAY_INTERMEDIATES
                             printf("bytes to be hashed: %s\n", valStr+2);
@@ -489,6 +506,7 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         printf("ERROR: bool arrays not yet implemented\n");
                         return 0;
                     } else {
+                        confirmValue(valStr);
                         #ifdef DISPLAY_INTERMEDIATES
                         printf("bool: %s\n", valStr);
                         #endif
@@ -588,12 +606,6 @@ int parseVals(const json_t *eip712Types, const json_t *jType, const json_t *next
                         #endif
                     }                         
                 }
-            }
-
-            if (JSON_TEXT == json_getType(walkVals) || JSON_INTEGER == json_getType(walkVals)) {
-                confirmValue(valStr);
-            } else {
-                // this means there is complex json data, i.e., values that are bracketed pairs to be parsed
             }
 
             // hash encoded bytes to final context
@@ -757,13 +769,13 @@ int main(int argc, char *argv[]) {
     
     // parse out the 4 sections
     parseJsonName("\"types\"", jsonStr, typesJsonStr, TYPES_BUFSIZE);
-    //printf("%s\n\n", typesJsonStr);
+    printf("%s\n\n", typesJsonStr);
     parseJsonName("\"domain\"", jsonStr, domainJsonStr, DOMAIN_BUFSIZE);
     //printf("%s\n\n", domainJsonStr);
     parseJsonName("\"message\"", jsonStr, messageJsonStr, MESSAGE_BUFSIZE);
     //printf("%s\n\n", messageJsonStr);
     parseJsonName("\"primaryType\"", jsonStr, primaryTypeJsonStr, MESSAGE_BUFSIZE);
-    //printf("%s\n\n", messageJsonStr);
+    //printf("%s\n\n", primaryTypeJsonStr);
 
     json_t mem[JSON_OBJ_POOL_SIZE];
     json = json_create(jsonStr, mem, sizeof mem / sizeof *mem );
