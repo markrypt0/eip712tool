@@ -21,7 +21,7 @@ bool review(ButtonRequestType type, const char *request_title, const char *reque
     vsnprintf(strbuf, sizeof(strbuf), request_body, vl);
     va_end(vl);
 
-		printf("kk review message: %s\n", strbuf);
+		printf("kk review message: Title->%s, %s\n", request_title, strbuf);
 
     return true;
 }
