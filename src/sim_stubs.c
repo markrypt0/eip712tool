@@ -25,3 +25,17 @@ bool review(ButtonRequestType type, const char *request_title, const char *reque
 
     return true;
 }
+
+bool review_with_icon(ButtonRequestType type, IconType iconNum, const char *request_title, const char *request_body,
+            ...)
+{
+    button_request_acked = false;
+    va_list vl;
+    va_start(vl, request_body);
+    vsnprintf(strbuf, sizeof(strbuf), request_body, vl);
+    va_end(vl);
+
+		printf("kk review_with_icon message: <iconNum> %d  Title->%s, %s\n", iconNum, request_title, strbuf);
+
+    return true;
+}

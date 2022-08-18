@@ -21,12 +21,16 @@
 #define CONFIRM_SM_H
 
 #include <stdbool.h>
+#include "keepkey/board/layout.h"
+
 
 typedef enum {
     ButtonRequestType_ButtonRequest_Other = 1
 } ButtonRequestType;
 
 bool review(ButtonRequestType type, const char *request_title, const char *request_body,
+            ...);
+bool review_with_icon(ButtonRequestType type, IconType iconNum, const char *request_title, const char *request_body,
             ...);
 
 #define DEBUG_DISPLAY_VAL(TITLE,VALNAME,SIZE,BYTES) \
