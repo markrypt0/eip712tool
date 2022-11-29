@@ -22,7 +22,21 @@
 
 #include <stdbool.h>
 #include "keepkey/board/layout.h"
-
+typedef enum _FailureType {
+    FailureType_Failure_UnexpectedMessage = 1,
+    FailureType_Failure_ButtonExpected = 2,
+    FailureType_Failure_SyntaxError = 3,
+    FailureType_Failure_ActionCancelled = 4,
+    FailureType_Failure_PinExpected = 5,
+    FailureType_Failure_PinCancelled = 6,
+    FailureType_Failure_PinInvalid = 7,
+    FailureType_Failure_InvalidSignature = 8,
+    FailureType_Failure_Other = 9,
+    FailureType_Failure_NotEnoughFunds = 10,
+    FailureType_Failure_NotInitialized = 11,
+    FailureType_Failure_PinMismatch = 12,
+    FailureType_Failure_FirmwareError = 99
+} FailureType;
 
 typedef enum {
     ButtonRequestType_ButtonRequest_Other = 1
@@ -32,6 +46,8 @@ bool review(ButtonRequestType type, const char *request_title, const char *reque
             ...);
 bool review_with_icon(ButtonRequestType type, IconType iconNum, const char *request_title, const char *request_body,
             ...);
+
+void fsm_sendFailure(FailureType code, const char *text);
 
 #define DEBUG_DISPLAY_VAL(TITLE,VALNAME,SIZE,BYTES) \
 {\

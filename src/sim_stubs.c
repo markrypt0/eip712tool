@@ -39,3 +39,8 @@ bool review_with_icon(ButtonRequestType type, IconType iconNum, const char *requ
 
     return true;
 }
+
+void fsm_sendFailure(FailureType code, const char *text)
+{
+  printf("sendFailure message %d: %s", code, text);
+}

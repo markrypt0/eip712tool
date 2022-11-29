@@ -9,7 +9,7 @@ dep = $(obj:.o=.d)
 
 .PHONY: build all clean
 
-build: sim712.exe
+build: sim712.exe simevp.exe
 
 all: clean build
 
@@ -22,6 +22,9 @@ clean::
 
 
 sim712.exe: sim712.c eip712.o sim_stubs.o ethereum_tokens.o sha3.o memzero.o tiny-json.o
+	gcc $(CFLAGS) -o $@ $^	
+
+simevp.exe: simevp.c sim_stubs.o ethereum_tokens.o sha3.o memzero.o tiny-json.o
 	gcc $(CFLAGS) -o $@ $^	
 
 -include $(dep);

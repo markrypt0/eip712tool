@@ -4,23 +4,17 @@
 
 #include <string.h>
 
-const TokenType tokens[] = {
-#define X(CHAIN_ID, CONTRACT_ADDR, TICKER, DECIMALS) \
-  {(CONTRACT_ADDR), (TICKER), (CHAIN_ID), (DECIMALS)},
-#include "keepkey/firmware/uniswap_tokens.def"
-#include "keepkey/firmware/ethereum_tokens.def"
-};
-
-_Static_assert(sizeof(tokens) / sizeof(tokens[0]) == TOKENS_COUNT,
-               "TOKENS_COUNT mismatch");
+TokenType tokens[TOKENS_COUNT] = {0};
 
 static const TokenType Unknown = {
+    true,
     "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
     "\x00\x00",
     " UNKN", 1, 0};
 const TokenType *UnknownToken = (const TokenType *)&Unknown;
 
 static const TokenType Ethtest = {
+    true,
     "\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee\xee"
     "\xee\xee",
     "  ETH", 1, 18};
