@@ -6,3 +6,4 @@
 ./sim712.exe metamask_array_of_structs.json
 ./sim712.exe struct_list_v4.json
 ./sim712.exe structs_array_v4.json
+./sim712.exe walletConnectRefMsg.json

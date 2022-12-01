@@ -27,7 +27,7 @@
         requires all complete json message strings to be enclosed by braces, i.e., { ... }
         Cannot have entire json string quoted, i.e., "{ ... }" will not work.
         Remove all quote escape chars, e.g., {"types":  not  {\"types\":
-    int values must be hex. Negative sign indicates negative value, e.g., -5, -8a67 
+    int: Strings representing ints must fit into a long size. 
         Note: Do not prefix ints or uints with 0x
     All hex and byte strings must be big-endian
     Byte strings and address should be prefixed by 0x
@@ -175,7 +175,7 @@ int main(int argc, char *argv[]) {
         }
         printf(BOLDRED "\nTest data file %s.json\n" RESET, resval);
     } else {
-        printf(BOLDRED "\nNo \"results\" entry in json file" RESET);
+        printf(BOLDRED "\nNo \"results\" entry in json file\n" RESET);
     }
 
     // encode domain separator
@@ -215,7 +215,7 @@ int main(int argc, char *argv[]) {
     }
 
     // encode primaryType type
-
+    printf("\n\n\n\n");
     jsonV = json_create(messageJsonStr, memVals, sizeof memVals / sizeof *memVals );
     jsonPT = json_create(primaryTypeJsonStr, memPType, sizeof memPType / sizeof *memPType );
     if ( !jsonV ) {
